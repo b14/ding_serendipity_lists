@@ -1,0 +1,138 @@
+<?php
+// $id$
+
+/**
+ * @file
+ * empty module which is used for custom development.
+ *
+ * Description of the module.
+ */
+
+/**
+ * implements hook_serendipity_info()
+ */
+function ding_serendipity_lists_serendipity_info() {
+  return array(
+    'id_lists' => array(
+      'title' => 'Id lists', // Required
+      'description' => 'Description of ID Lists', // Required
+      'keys' => array('id_lists'), // Required
+    ),
+    'author_from_lists' => array(
+      'title' => 'Objects matching random author from lists',
+      'description' => 'Objects matching random author from lists. Combined with tid',
+      'keys' => array('taxonomy_tid', 'frontpage'),
+    ),
+    'followed_terms_nodes' => array(
+      'title' => 'Nodes matching followed terms',
+      'description' => 'Nodes matching followed terms. Filter by <em>bundle</em>',
+      'keys' => array('taxonomy_tid', 'frontpage'),
+    ),
+
+  );
+}
+
+function ding_serendipity_get_ting_value($ting_entity, $field) {
+  if(empty($ting_entity))
+    return;
+  $record = $ting_entity->getRecord();
+  
+  // Make sure the value exists
+  if (!isset($record[$field])) {
+    return FALSE;
+  }
+  
+  $values = current($record[$field]);  
+  if (!isset($values[0])) {
+    return FALSE;
+  }
+  return $values[0];
+}
+
+
+/**
+ * Find objects matching some random author from the user lists
+ *
+ * @param $context
+ *  Serendipity context
+ */
+function ding_serendipity_lists_author_from_lists_serendipity_add($context) {
+  if ($context['bundle'] != 'ting_object') return array();
+  
+  $terms = array();
+
+  // Random user list item
+  $ting_entity= ding_list_get_random_user_list_item();
+
+  // Fetch author
+  $author = ding_serendipity_get_ting_value($ting_entity, 'dc:creator');
+  if ($author == FALSE) return array();  
+  
+  $terms[] = "facet.creator=\"$author\"";
+  // Taxonomy terms except frontpage has a subject
+  $query_term = "";
+  if ($context['frontpage'] !== "1" && isset($context['taxonomy_tid']) ) {
+    $term = taxonomy_term_load($context['taxonomy_tid']);
+    if (!empty($term->field_search_string)) {
+      $terms[] = $term->field_search_string[field_language('taxonomy_term', $term, 'field_search_string')][0]['value'];
+    }
+    else {    
+      $terms[] = "facet.subject=\"$term->name\"";
+    }
+  }
+
+  $query = implode(" AND ", $terms);  
+  
+  return ding_serendipity_do_search($query);
+}
+
+
+
+/**
+ * Serendipity contribution
+ *
+ * Fetch nodes of type $context['bundle'] 
+ * matching followed terms
+ *
+ */
+function ding_serendipity_lists_followed_terms_nodes_serendipity_add($context) {
+  global $user;
+  
+  if (!user_is_logged_in() || empty($context['bundle']) || !$context['frontpage']) {
+    return array();
+  }
+  
+  $tids = ding_list_load_keys($user, DING_LIST_TYPE_FOLLOW, 'taxonomy_term');
+  
+  $nids = ding_list_tids_to_nids($tids, $context['bundle']);
+  
+  $result = array();
+  foreach ($nids as $nid) {
+    $result[] = array('type' => 'node', 'id' => $nid);
+  }
+  
+  return $result;
+}
+
+
+/**
+ * Serendipity callback function for id_lists.
+ * In case you know in advance some id's to inject into serendipity.
+ * Seriously consider to write a seperate serendipity plugin instead of using this.
+ *
+ *
+ * @param $context
+ *  Serendipity context array
+ */
+function ding_serendipity_lists_id_lists_serendipity_add($context) {
+  $result = array();
+  // A list of predefined ids.
+  foreach ($context['id_lists'] as $type => $list) {
+    foreach ($list as $id) {
+      $result[] = array('type' => $type, 'id' => $id);
+    }
+  }
+  return $result;
+}
+
+

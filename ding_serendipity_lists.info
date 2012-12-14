@@ -1,0 +1,10 @@
+; $Id$
+name = Ding serendipity lists
+description = Serendipity based on user ding_lists
+package = Ding!
+version = "7.x-1.0-dev"
+core = 7.x
+files[] = ding_serendipity_lists.module
+dependencies[] = ding_serendipity
+;scripts[] = js/ding_serendipity_lists.js
+;stylesheets[all][] = css/main.css
