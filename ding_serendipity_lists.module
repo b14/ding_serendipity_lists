@@ -1,6 +1,4 @@
 <?php
-// $id$
-
 /**
  * @file
  * empty module which is used for custom development.
@@ -32,6 +30,15 @@ function ding_serendipity_lists_serendipity_info() {
   );
 }
 
+/**
+ * Helper function to exctract optional field values from a ting_entity
+ *
+ * @param $ting_entity
+ *  The entity to fetch the field from
+ *
+ * @param $field
+ *  Name of the field
+ */
 function ding_serendipity_get_ting_value($ting_entity, $field) {
   if(empty($ting_entity))
     return;
