@@ -1,7 +1,7 @@
 <?php
 /**
  * @file
- * empty module which is used for custom development.
+ * This module provides serendipity functions based on user lists and loans
  *
  * Description of the module.
  */
@@ -16,44 +16,85 @@ function ding_serendipity_lists_serendipity_info() {
       'description' => 'Description of ID Lists', // Required
       'keys' => array('id_lists'), // Required
     ),
+    'loan_adhl' => array(
+      'title' => 'ADHL on random loan items',
+      'description' => 'Send random loans to ADHL for serendipity.',
+      'keys' => array('taxonomy_tid', 'frontpage'),
+    ),
     'author_from_lists' => array(
       'title' => 'Objects matching random author from lists',
       'description' => 'Objects matching random author from lists. Combined with tid',
-      'keys' => array('taxonomy_tid', 'frontpage'),
+      'keys' => array('taxonomy_tid'),
     ),
     'followed_terms_nodes' => array(
       'title' => 'Nodes matching followed terms',
       'description' => 'Nodes matching followed terms. Filter by <em>bundle</em>',
       'keys' => array('taxonomy_tid', 'frontpage'),
     ),
-
+    'followed_terms_ting_objects' => array(
+      'title' => 'Ting objects matching followed terms',
+      'description' => 'Ting objects matching a random followed term.',
+      'keys' => array('frontpage'),
+    ),
   );
 }
 
 /**
- * Helper function to exctract optional field values from a ting_entity
+ * Select random objects from current loans and fetch
+ * recommended objecs via ADHL service
  *
- * @param $ting_entity
- *  The entity to fetch the field from
- *
- * @param $field
- *  Name of the field
+ * @param $context
+ *  Serendipity context
  */
-function ding_serendipity_get_ting_value($ting_entity, $field) {
-  if(empty($ting_entity))
-    return;
-  $record = $ting_entity->getRecord();
+function ding_serendipity_lists_loan_adhl_serendipity_add($context) {
+  global $user;
+  $results = array();
   
-  // Make sure the value exists
-  if (!isset($record[$field])) {
-    return FALSE;
+  // Only provider users has current loans
+  if (!ding_user_is_provider_user($user)) {
+    return $results;
   }
   
-  $values = current($record[$field]);  
-  if (!isset($values[0])) {
-    return FALSE;
+  $loans = ding_provider_invoke_page('loan', 'list', $user);
+  if(!empty($loans) && $loans) {
+    // Pick max 3 random current loans
+    $amount = count($loans);
+    $rand_count = ($amount > 3) ? 3 : $amount;
+    $randoms = array_rand($loans, $rand_count);
+    
+    foreach ($randoms as $random) {
+      $obj = ding_entity_load($loans[$random]->ding_entity_id, 'ting_object');
+      if(!empty($obj)) {
+        $record = $obj->getRecord();
+        
+        // Fetch recommended objects via ADHL 
+        $request = ting_get_request_factory()->getObjectRecommendationRequest();
+        if(isset($record['dc:identifier']['dkdcplus:ISBN'])) {
+          $request->setIsbn($record['dc:identifier']['dkdcplus:ISBN']);
+          $request->setNumResults(4);
+          
+          if (($agency = variable_get('ting_agency', '')) != '') {
+            $agency .= ':';
+          }
+          $recommendations = ting_execute_cache($request);
+          if(!empty($recommendations)) {
+            
+            // Collect ADHL recommendations to results
+            foreach ($recommendations as $recommendation) {
+              $results[] = array(
+                'type' => 'ting_object',
+                'id' => $agency . $recommendation->localId,
+                'info' => array(
+                  'adhl' =>  'adhl', // @todo insert title of the source record
+                )
+              );
+            }
+          }
+        }
+      }
+    }
   }
-  return $values[0];
+  return $results;
 }
 
 
@@ -64,7 +105,7 @@ function ding_serendipity_get_ting_value($ting_entity, $field) {
  *  Serendipity context
  */
 function ding_serendipity_lists_author_from_lists_serendipity_add($context) {
-  if ($context['bundle'] != 'ting_object') return array();
+  if (!isset($context['bundle']) || $context['bundle'] != 'ting_object') return array();
   
   $terms = array();
 
@@ -72,28 +113,32 @@ function ding_serendipity_lists_author_from_lists_serendipity_add($context) {
   $ting_entity= ding_list_get_random_user_list_item();
 
   // Fetch author
-  $author = ding_serendipity_get_ting_value($ting_entity, 'dc:creator');
+  $author = ding_base_get_ting_value($ting_entity, 'dc:creator');
   if ($author == FALSE) return array();  
   
-  $terms[] = "facet.creator=\"$author\"";
+  $terms[] = "dc.creator=\"$author\"";
   // Taxonomy terms except frontpage has a subject
-  $query_term = "";
   if ($context['frontpage'] !== "1" && isset($context['taxonomy_tid']) ) {
     $term = taxonomy_term_load($context['taxonomy_tid']);
     if (!empty($term->field_search_string)) {
       $terms[] = $term->field_search_string[field_language('taxonomy_term', $term, 'field_search_string')][0]['value'];
     }
     else {    
-      $terms[] = "facet.subject=\"$term->name\"";
+      $terms[] = "dc.subject=\"$term->name\"";
     }
   }
 
   $query = implode(" AND ", $terms);  
   
-  return ding_serendipity_do_search($query);
+  // Fetch search results
+  $results = ding_base_do_search($query);
+  
+  // Append info
+  foreach($results as &$item) {    
+    $item['info'] = array("Query" => $query);
+  }
+  return $results;
 }
-
-
 
 /**
  * Serendipity contribution
@@ -121,6 +166,52 @@ function ding_serendipity_lists_followed_terms_nodes_serendipity_add($context) {
   return $result;
 }
 
+
+
+
+/**
+ * Serendipity contribution via followed terms
+ * 
+ * @param $context
+ *  Serendipity context array
+ */
+function ding_serendipity_lists_followed_terms_ting_objects_serendipity_add($context) {
+  global $user;
+  
+  if (!user_is_logged_in() || empty($context['bundle']) || $context['bundle'] != 'ting_object' || !$context['frontpage']) {
+    return array();
+  }
+
+  // Fetch followed terms  
+  $tids = ding_list_load_keys($user, DING_LIST_TYPE_FOLLOW, 'taxonomy_term');  
+
+  if (count($tids) == 0) {return array();}
+  
+  // Load random term
+  $term = taxonomy_term_load($tids[array_rand($tids)]);  
+  if (!$term) {return array();}
+  
+  if (!empty($term->field_search_string)) {
+    $query = $term->field_search_string[field_language('taxonomy_term', $term, 'field_search_string')][0]['value'];
+  } else {    
+    $query = "dc.subject=\"$term->name\"";
+  }
+
+  // Fetch search results
+  $results = ding_base_do_search(
+    $query,
+    array(
+      'shuffle' => true,
+      'limit' => 4,
+  ));
+  
+  // Append source info
+  foreach($results as &$item) {    
+    $item['info'] = array("Term" => $term->name);
+  }
+  return $results;
+
+}
 
 /**
  * Serendipity callback function for id_lists.

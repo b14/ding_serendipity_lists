@@ -1,7 +1,10 @@
 name = Ding serendipity lists
 description = Serendipity based on user ding_lists
 package = Ding!
-version = "7.x-1.0-dev"
+version = "7.x-1.1-dev"
 core = 7.x
 files[] = ding_serendipity_lists.module
+dependencies[] = ding_base
+dependencies[] = ding_list
+dependencies[] = ding_loan
 dependencies[] = ding_serendipity
